@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earn To Die - Game Launcher</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            color: #eee;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+            color: #e94560;
+            text-shadow: 0 0 20px rgba(233,69,96,0.5);
+        }
+        .subtitle { color: #888; margin-bottom: 30px; font-size: 0.9em; }
+        .game-list {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .game-btn {
+            background: linear-gradient(135deg, #16213e, #0f3460);
+            border: 2px solid #e94560;
+            color: #fff;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: all 0.3s;
+        }
+        .game-btn:hover {
+            background: linear-gradient(135deg, #e94560, #c0392b);
+            transform: scale(1.05);
+        }
+        .game-btn.active {
+            background: #e94560;
+            box-shadow: 0 0 20px rgba(233,69,96,0.6);
+        }
+        #game-container {
+            width: 900px;
+            max-width: 95vw;
+            aspect-ratio: 900/600;
+            background: #000;
+            border: 3px solid #e94560;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(233,69,96,0.3);
+        }
+        #game-container ruffle-player {
+            width: 100%;
+            height: 100%;
+        }
+        .tips {
+            margin-top: 15px;
+            color: #666;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Earn To Die</h1>
+    <p class="subtitle">Powered by Ruffle Flash Emulator</p>
+
+    <div class="game-list">
+        <button class="game-btn active" onclick="loadGame('EarnToDie/earn-to-die-2012.swf', this)">Earn To Die 1</button>
+        <button class="game-btn" onclick="loadGame('EarnToDie2/game.swf', this)">Earn To Die 2</button>
+    </div>
+
+    <div id="game-container"></div>
+    <p class="tips">提示：使用方向键控制车辆，空格键加速</p>
+
+    <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
+    <script>
+        function loadGame(swfPath, btn) {
+            document.querySelectorAll('.game-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const container = document.getElementById('game-container');
+            container.innerHTML = '';
+
+            const ruffle = window.RufflePlayer.newest();
+            const player = ruffle.createPlayer();
+            player.style.width = '100%';
+            player.style.height = '100%';
+            container.appendChild(player);
+            player.load(swfPath);
+        }
+
+        // Auto load first game
+        window.addEventListener('DOMContentLoaded', () => {
+            loadGame('EarnToDie/earn-to-die-2012.swf', document.querySelector('.game-btn'));
+        });
+    </script>
+</body>
+</html>
