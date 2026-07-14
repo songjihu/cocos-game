@@ -22,11 +22,41 @@
             color: #e94560;
             text-shadow: 0 0 20px rgba(233,69,96,0.5);
         }
-        .subtitle { color: #888; margin-bottom: 30px; font-size: 0.9em; }
+        .subtitle { color: #888; margin-bottom: 20px; font-size: 0.9em; }
+        .sync-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .sync-btn {
+            background: #0f3460;
+            border: 1px solid #53a8b6;
+            color: #53a8b6;
+            padding: 8px 16px;
+            font-size: 0.85em;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+        .sync-btn:hover { background: #53a8b6; color: #fff; }
+        .sync-btn.danger { border-color: #e94560; color: #e94560; }
+        .sync-btn.danger:hover { background: #e94560; color: #fff; }
+        .sync-status {
+            font-size: 0.8em;
+            color: #888;
+            padding: 4px 12px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+        }
+        .sync-status.ok { color: #4ecca3; }
+        .sync-status.warn { color: #f0a500; }
         .game-list {
             display: flex;
             gap: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             flex-wrap: wrap;
             justify-content: center;
         }
@@ -67,40 +97,268 @@
             color: #666;
             font-size: 0.85em;
         }
+        #log {
+            margin-top: 10px;
+            font-size: 0.75em;
+            color: #555;
+            max-width: 600px;
+            text-align: center;
+            min-height: 1.2em;
+        }
     </style>
 </head>
 <body>
     <h1>Earn To Die</h1>
     <p class="subtitle">Powered by Ruffle Flash Emulator</p>
 
+    <div class="sync-bar">
+        <span class="sync-status" id="syncStatus">检查存档中...</span>
+        <button class="sync-btn" onclick="backupToLocal()">备份到本地</button>
+        <button class="sync-btn" onclick="restoreFromLocal()">从本地恢复</button>
+        <button class="sync-btn danger" onclick="clearLocalSave()">清除本地存档</button>
+    </div>
+
     <div class="game-list">
-        <button class="game-btn active" onclick="loadGame('EarnToDie/earn-to-die-2012.swf', this)">Earn To Die 1</button>
-        <button class="game-btn" onclick="loadGame('EarnToDie2/game.swf', this)">Earn To Die 2</button>
+        <button class="game-btn active" onclick="loadGame('EarnToDie/earn-to-die-2012.swf', 'EarnToDie', this)">Earn To Die 1</button>
+        <button class="game-btn" onclick="loadGame('EarnToDie2/game.swf', 'EarnToDie2', this)">Earn To Die 2</button>
     </div>
 
     <div id="game-container"></div>
-    <p class="tips">提示：使用方向键控制车辆，空格键加速</p>
+    <p class="tips">提示：使用方向键控制车辆，空格键加速 | 游戏会自动存档</p>
+    <div id="log"></div>
 
     <script src="https://unpkg.com/@ruffle-rs/ruffle"></script>
     <script>
-        function loadGame(swfPath, btn) {
+        // ============ 存档同步系统 ============
+        const SAVE_PREFIX = 'etd_save_';
+        const GITHUB_RAW = 'https://raw.githubusercontent.com/songjihu/cocos-game/master/workspace/EarnToDieLauncher/';
+        let currentGameId = 'EarnToDie';
+        let player = null;
+        let saveCheckInterval = null;
+
+        function log(msg) {
+            document.getElementById('log').textContent = msg;
+            console.log('[SaveSync]', msg);
+        }
+
+        function setStatus(msg, cls) {
+            const el = document.getElementById('syncStatus');
+            el.textContent = msg;
+            el.className = 'sync-status' + (cls ? ' ' + cls : '');
+        }
+
+        // 获取 Ruffle 写入的 localStorage 键（SharedObject 数据）
+        function getRuffleSaveKeys(gameId) {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                // Ruffle 的 SharedObject 键通常包含 #SharedObject 或游戏相关标识
+                if (key && (key.includes('#SharedObject') || key.includes('ruffle'))) {
+                    keys.push(key);
+                }
+            }
+            // 也检查我们自己的备份键
+            const backupKey = SAVE_PREFIX + gameId;
+            return { ruffleKeys: keys, backupKey };
+        }
+
+        // 备份当前 localStorage 中的存档到我们的命名空间
+        function backupToLocal() {
+            const keys = getRuffleSaveKeys(currentGameId);
+            const saveData = {};
+            
+            // 保存所有 Ruffle SharedObject 数据
+            keys.ruffleKeys.forEach(key => {
+                try {
+                    saveData[key] = localStorage.getItem(key);
+                } catch(e) {}
+            });
+
+            // 也保存所有以 #SharedObject 开头的键
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('#SharedObject')) {
+                    saveData[key] = localStorage.getItem(key);
+                }
+            }
+
+            if (Object.keys(saveData).length === 0) {
+                setStatus('没有找到存档数据', 'warn');
+                log('当前没有可备份的存档');
+                return;
+            }
+
+            const backup = {
+                gameId: currentGameId,
+                timestamp: new Date().toISOString(),
+                data: saveData
+            };
+
+            localStorage.setItem(keys.backupKey, JSON.stringify(backup));
+            setStatus('已备份到本地 ' + formatTime(backup.timestamp), 'ok');
+            log('存档已备份: ' + Object.keys(saveData).length + ' 个键');
+        }
+
+        // 从本地备份恢复存档
+        function restoreFromLocal() {
+            const keys = getRuffleSaveKeys(currentGameId);
+            const backupStr = localStorage.getItem(keys.backupKey);
+            
+            if (!backupStr) {
+                setStatus('没有找到本地备份', 'warn');
+                log('本地没有该游戏的备份存档');
+                return;
+            }
+
+            const backup = JSON.parse(backupStr);
+            Object.entries(backup.data).forEach(([key, value]) => {
+                localStorage.setItem(key, value);
+            });
+
+            setStatus('已从本地恢复 ' + formatTime(backup.timestamp), 'ok');
+            log('已恢复 ' + Object.keys(backup.data).length + ' 个存档键，请刷新页面生效');
+        }
+
+        // 从 GitHub 恢复存档
+        async function restoreFromGitHub() {
+            try {
+                setStatus('从 GitHub 获取存档...', '');
+                const resp = await fetch(GITHUB_RAW + 'saves/' + currentGameId + '.json?t=' + Date.now());
+                if (!resp.ok) {
+                    setStatus('GitHub 上暂无该游戏存档', 'warn');
+                    log('GitHub 上没有找到 ' + currentGameId + ' 的存档');
+                    return;
+                }
+                const remoteSave = await resp.json();
+                Object.entries(remoteSave.data).forEach(([key, value]) => {
+                    localStorage.setItem(key, value);
+                });
+                setStatus('已从 GitHub 恢复 ' + formatTime(remoteSave.timestamp), 'ok');
+                log('从 GitHub 恢复了 ' + Object.keys(remoteSave.data).length + ' 个存档键');
+            } catch(e) {
+                setStatus('GitHub 存档获取失败', 'warn');
+                log('GitHub 存档获取失败: ' + e.message);
+            }
+        }
+
+        // 清除本地存档
+        function clearLocalSave() {
+            if (!confirm('确定要清除本地存档吗？此操作不可撤销！')) return;
+            const keys = getRuffleSaveKeys(currentGameId);
+            localStorage.removeItem(keys.backupKey);
+            // 清除 Ruffle SharedObject
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('#SharedObject')) {
+                    localStorage.removeItem(key);
+                }
+            }
+            setStatus('本地存档已清除', 'warn');
+            log('本地存档已清除，请刷新页面');
+        }
+
+        // 启动时自动同步：对比本地备份和 GitHub 存档，使用更新的
+        async function autoSync() {
+            const keys = getRuffleSaveKeys(currentGameId);
+            const backupStr = localStorage.getItem(keys.backupKey);
+            let localTime = null;
+            let remoteTime = null;
+
+            // 检查本地备份时间
+            if (backupStr) {
+                try {
+                    const backup = JSON.parse(backupStr);
+                    localTime = new Date(backup.timestamp);
+                } catch(e) {}
+            }
+
+            // 检查 GitHub 存档时间
+            try {
+                const resp = await fetch(GITHUB_RAW + 'saves/' + currentGameId + '.json?t=' + Date.now());
+                if (resp.ok) {
+                    const remoteSave = await resp.json();
+                    remoteTime = new Date(remoteSave.timestamp);
+                }
+            } catch(e) {
+                log('GitHub 连接失败，使用本地存档');
+            }
+
+            // 对比并决定使用哪个
+            if (remoteTime && localTime) {
+                if (remoteTime > localTime) {
+                    log('GitHub 存档更新 (' + formatTime(remoteTime) + ') > 本地 (' + formatTime(localTime) + ')，从 GitHub 恢复');
+                    await restoreFromGitHub();
+                } else if (localTime > remoteTime) {
+                    log('本地存档更新 (' + formatTime(localTime) + ') > GitHub (' + formatTime(remoteTime) + ')，使用本地存档');
+                    setStatus('使用本地存档 ' + formatTime(localTime), 'ok');
+                } else {
+                    setStatus('存档已同步 ' + formatTime(localTime), 'ok');
+                }
+            } else if (remoteTime && !localTime) {
+                log('本地无存档，从 GitHub 恢复');
+                await restoreFromGitHub();
+            } else if (localTime && !remoteTime) {
+                setStatus('使用本地存档 ' + formatTime(localTime), 'ok');
+                log('GitHub 上暂无存档，使用本地备份');
+            } else {
+                setStatus('暂无存档数据', '');
+                log('本地和 GitHub 都没有存档');
+            }
+        }
+
+        // 定期自动备份（每30秒）
+        function startAutoBackup() {
+            if (saveCheckInterval) clearInterval(saveCheckInterval);
+            saveCheckInterval = setInterval(() => {
+                // 检查是否有 Ruffle SharedObject 数据
+                let hasSave = false;
+                for (let i = 0; i < localStorage.length; i++) {
+                    if (localStorage.key(i)?.startsWith('#SharedObject')) {
+                        hasSave = true;
+                        break;
+                    }
+                }
+                if (hasSave) {
+                    backupToLocal();
+                }
+            }, 30000);
+        }
+
+        function formatTime(isoStr) {
+            const d = new Date(isoStr);
+            return d.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        }
+
+        // ============ 游戏加载 ============
+        function loadGame(swfPath, gameId, btn) {
             document.querySelectorAll('.game-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            currentGameId = gameId;
 
             const container = document.getElementById('game-container');
             container.innerHTML = '';
 
             const ruffle = window.RufflePlayer.newest();
-            const player = ruffle.createPlayer();
+            player = ruffle.createPlayer();
             player.style.width = '100%';
             player.style.height = '100%';
             container.appendChild(player);
             player.load(swfPath);
+
+            setStatus('检查存档中...', '');
+            log('加载 ' + gameId + '...');
+            autoSync();
+            startAutoBackup();
         }
 
-        // Auto load first game
+        // 页面关闭前自动备份
+        window.addEventListener('beforeunload', () => {
+            backupToLocal();
+        });
+
+        // 自动加载第一个游戏
         window.addEventListener('DOMContentLoaded', () => {
-            loadGame('EarnToDie/earn-to-die-2012.swf', document.querySelector('.game-btn'));
+            loadGame('EarnToDie/earn-to-die-2012.swf', 'EarnToDie', document.querySelector('.game-btn'));
         });
     </script>
 </body>

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-14T21:50:00Z",
+  "saves": {
+    "EarnToDie": {
+      "swf": "earn-to-die-2012.swf",
+      "localStorageKeys": []
+    },
+    "EarnToDie2": {
+      "swf": "game.swf",
+      "localStorageKeys": []
+    }
+  }
+}
